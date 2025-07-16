@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Base 체인 USDT 드랍 텔레그램 봇
+Base 체인 USDC 드랍 텔레그램 봇
 기능:
 1. 지갑 등록: /set "wallet_address" 인라인 처리
-2. 랜덤 드랍: 채팅시 일정 확률로 USDT 전송
+2. 랜덤 드랍: 채팅시 일정 확률로 USDC 전송
 """
 
 import os
@@ -103,14 +103,14 @@ class WalletManager:
 class TransactionManager:
     """Base 체인 트랜잭션 관리 클래스"""
     
-    def __init__(self, rpc_url: str, usdt_contract_address: str, private_key: str):
+    def __init__(self, rpc_url: str, usdc_contract_address: str, private_key: str):
         self.rpc_url = rpc_url
-        self.usdt_contract_address = Web3.to_checksum_address(usdt_contract_address)
+        self.usdc_contract_address = Web3.to_checksum_address(usdc_contract_address)
         self.private_key = private_key
         self.w3 = Web3(Web3.HTTPProvider(rpc_url))
         
-        # USDT 컨트랙트 ABI (transfer 함수만)
-        self.usdt_abi = [
+        # USDC 컨트랙트 ABI (transfer 함수만)
+        self.usdc_abi = [
             {
                 "constant": False,
                 "inputs": [
@@ -130,9 +130,9 @@ class TransactionManager:
             }
         ]
         
-        self.usdt_contract = self.w3.eth.contract(
-            address=self.usdt_contract_address,
-            abi=self.usdt_abi
+        self.usdc_contract = self.w3.eth.contract(
+            address=self.usdc_contract_address,
+            abi=self.usdc_abi
         )
         
         # 지갑 계정 설정
@@ -150,33 +150,26 @@ class TransactionManager:
         """랜덤 드랍 여부 결정"""
         return random.random() < drop_rate
     
-    def get_usdt_balance(self, address: str) -> float:
-        """USDT 잔고 조회"""
+    def get_usdc_balance(self, address: str) -> float:
+        """USDC 잔고 조회"""
         try:
-            balance_wei = self.usdt_contract.functions.balanceOf(
+            balance_wei = self.usdc_contract.functions.balanceOf(
                 Web3.to_checksum_address(address)
             ).call()
-            # USDT는 6자리 소수점
+            # USDC는 6자리 소수점
             return balance_wei / (10 ** 6)
         except Exception as e:
-            logging.error(f"USDT 잔고 조회 실패: {e}")
+            logging.error(f"USDC 잔고 조회 실패: {e}")
             return 0.0
     
-    def send_usdt(self, to_address: str, amount: float, simulate: bool = False) -> Optional[str]:
-        """USDT 전송"""
+    def send_usdc(self, to_address: str, amount: float) -> Optional[str]:
+        """USDC 전송"""
         try:
-            if simulate:
-                # 시뮬레이션 모드: 실제 전송하지 않고 가짜 해시 반환
-                fake_hash = f"0x{''.join([hex(random.randint(0, 15))[2:] for _ in range(64)])}"
-                logging.info(f"시뮬레이션: {amount} USDT를 {to_address}로 전송 (해시: {fake_hash})")
-                return fake_hash
-            
-            # 실제 전송 로직
             to_checksum = Web3.to_checksum_address(to_address)
-            amount_wei = int(amount * (10 ** 6))  # USDT 6자리 소수점
+            amount_wei = int(amount * (10 ** 6))  # USDC 6자리 소수점
             
             # 트랜잭션 구성
-            transaction = self.usdt_contract.functions.transfer(
+            transaction = self.usdc_contract.functions.transfer(
                 to_checksum, amount_wei
             ).build_transaction({
                 'from': self.account.address,
@@ -191,28 +184,25 @@ class TransactionManager:
             # 트랜잭션 전송
             tx_hash = self.w3.eth.send_raw_transaction(signed_txn.rawTransaction)
             
-            logging.info(f"USDT 전송 완료: {amount} USDT를 {to_address}로 (해시: {tx_hash.hex()})")
+            logging.info(f"USDC 전송 완료: {amount} USDC를 {to_address}로 (해시: {tx_hash.hex()})")
             return tx_hash.hex()
             
         except Exception as e:
-            logging.error(f"USDT 전송 실패: {e}")
+            logging.error(f"USDC 전송 실패: {e}")
             return None
 
-class USDTDropBot:
-    """USDT 드랍 텔레그램 봇"""
+class USDCDropBot:
+    """USDC 드랍 텔레그램 봇"""
     
     def __init__(self):
         # 환경변수 로드
         self.bot_token = os.getenv('TELEGRAM_BOT_TOKEN')
-        self.base_rpc = os.getenv('RPC_URL', 'https://base.llamarpc.com')
-        self.usdt_contract = os.getenv('USDT_CONTRACT_ADDRESS', '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913')
+        self.base_rpc = os.getenv('RPC_URL', 'https://base-mainnet.public.blastapi.io')
+        self.usdc_contract = os.getenv('USDC_CONTRACT_ADDRESS')
         self.private_key = os.getenv('PRIVATE_KEY')
         self.drop_rate = float(os.getenv('DROP_RATE', '0.05'))  # 5%
-        self.max_daily_amount = float(os.getenv('MAX_DAILY_AMOUNT', '100.0'))  # 100 USDT
+        self.max_daily_amount = float(os.getenv('MAX_DAILY_AMOUNT', '10.0'))  # Alter 10 USDC
         self.admin_user_id = os.getenv('ADMIN_USER_ID')
-        
-        # 시뮬레이션 모드 (테스트용)
-        self.simulation_mode = os.getenv('SIMULATION_MODE', 'true').lower() == 'true'
         
         if not self.bot_token:
             raise ValueError("TELEGRAM_BOT_TOKEN이 설정되지 않았습니다.")
@@ -225,12 +215,12 @@ class USDTDropBot:
         if self.private_key:
             self.tx_manager = TransactionManager(
                 self.base_rpc, 
-                self.usdt_contract, 
+                self.usdc_contract, 
                 self.private_key
             )
         else:
             self.tx_manager = None
-            logging.warning("PRIVATE_KEY가 설정되지 않았습니다. 시뮬레이션 모드로 동작합니다.")
+            logging.warning("PRIVATE_KEY가 설정되지 않았습니다.")
         
         # 일일 전송량 추적
         self.daily_sent = {}
@@ -245,18 +235,16 @@ class USDTDropBot:
         def handle_start(message):
             """시작 명령어"""
             welcome_text = f"""
-🎯 USDT 드랍 봇에 오신 것을 환영합니다!
+🎯 USDC 드랍 봇에 오신 것을 환영합니다!
 
 💰 기능:
-- 지갑 등록: /set "wallet_address"
+- 지갑 등록: /set wallet_address
 - 현재 설정: /info
 - 내 지갑: /wallet
 
 🎲 랜덤 드랍:
-- 채팅시 {self.drop_rate*100:.1f}% 확률로 USDT 드랍!
-- 하루 최대 {self.max_daily_amount} USDT
-
-🔧 모드: {'시뮬레이션' if self.simulation_mode else '실제 전송'}
+- 채팅시 {self.drop_rate*100:.1f}% 확률로 USDC 드랍!
+- 하루 최대 {self.max_daily_amount} USDC
             """
             self.bot.reply_to(message, welcome_text)
         
@@ -270,7 +258,7 @@ class USDTDropBot:
             wallet_address = self.parse_set_command(message.text)
             
             if not wallet_address:
-                self.bot.reply_to(message, "❌ 사용법: /set \"0x1234...\" 또는 /set 0x1234...")
+                self.bot.reply_to(message, "❌ 사용법: /set 0x1234...")
                 return
             
             # 인라인 처리: 즉시 검증 및 저장
@@ -282,7 +270,7 @@ class USDTDropBot:
 💳 주소: {wallet_address}
 🎲 드랍 확률: {self.drop_rate*100:.1f}%
 
-이제 채팅하면 랜덤으로 USDT를 받을 수 있어요! 🎉
+이제 채팅하면 랜덤으로 USDC를 받을 수 있어요! 🎉
                 """
                 self.bot.reply_to(message, success_text)
                 logging.info(f"지갑 등록 성공: {user_name} ({user_id}) -> {wallet_address}")
@@ -310,11 +298,10 @@ class USDTDropBot:
 📊 봇 설정 정보:
 
 🎲 드랍 확률: {self.drop_rate*100:.1f}%
-💰 하루 최대: {self.max_daily_amount} USDT
-📈 오늘 전송: {today_sent:.2f} USDT
+💰 하루 최대: {self.max_daily_amount} USDC
+📈 오늘 전송: {today_sent:.2f} USDC
 👥 등록 지갑: {len(self.wallet_manager.get_all_wallets())}개
 
-🔧 모드: {'🧪 시뮬레이션' if self.simulation_mode else '💸 실제 전송'}
 🌐 체인: Base Network
             """
             self.bot.reply_to(message, info_text)
@@ -339,16 +326,15 @@ class USDTDropBot:
         if not command_text:
             return None
         
-        # /set "0x..." 또는 /set 0x... 형태 파싱
-        patterns = [
-            r'/set\s+"([^"]+)"',  # /set "address"
-            r'/set\s+([0x][a-fA-F0-9]{40})',  # /set 0x...
-        ]
-        
-        for pattern in patterns:
-            match = re.search(pattern, command_text)
-            if match:
-                return match.group(1).strip()
+        # /set 다음에 오는 주소 추출 (공백으로 구분)
+        parts = command_text.strip().split()
+        if len(parts) >= 2 and parts[0] == '/set':
+            # /set 다음의 모든 부분을 주소로 간주
+            wallet_address = ' '.join(parts[1:]).strip()
+            # 쌍따옴표가 있다면 제거
+            if wallet_address.startswith('"') and wallet_address.endswith('"'):
+                wallet_address = wallet_address[1:-1]
+            return wallet_address
         
         return None
     
@@ -370,7 +356,7 @@ class USDTDropBot:
         if not (self.tx_manager and self.tx_manager.should_drop(self.drop_rate)):
             return  # 드랍 안함
         
-        # 드랍 금액 (0.005 ~ 0.01 USDT)
+        # 드랍 금액 (0.005 ~ 0.01 USDC)
         drop_amount = round(random.uniform(0.005, 0.01), 3)
         
         # 일일 한도 체크
@@ -379,11 +365,10 @@ class USDTDropBot:
             if drop_amount < 0.005:
                 return  # 너무 적으면 드랍 안함
         
-        # USDT 전송
-        tx_hash = self.tx_manager.send_usdt(
+        # USDC 전송
+        tx_hash = self.tx_manager.send_usdc(
             wallet_address, 
-            drop_amount, 
-            simulate=self.simulation_mode
+            drop_amount
         )
         
         if tx_hash:
@@ -391,38 +376,34 @@ class USDTDropBot:
             self.daily_sent[today] = today_sent + drop_amount
             
             # 드랍 알림
-            mode_emoji = "🧪" if self.simulation_mode else "💸"
             drop_text = f"""
-{mode_emoji} USDT 드랍! 🎉
+💸 USDC 드랍! 🎉
 
 👤 {user_name}
-💰 {drop_amount} USDT
+💰 {drop_amount} USDC
 💳 {wallet_address[:10]}...{wallet_address[-10:]}
 🔗 TX: {tx_hash[:10]}...{tx_hash[-10:]}
-
-{'(시뮬레이션)' if self.simulation_mode else ''}
             """
             
             self.bot.reply_to(message, drop_text)
-            logging.info(f"드랍 성공: {user_name} ({user_id}) -> {drop_amount} USDT")
+            logging.info(f"드랍 성공: {user_name} ({user_id}) -> {drop_amount} USDC")
     
     def run(self):
         """봇 실행"""
-        logging.info("USDT 드랍 봇 시작")
-        logging.info(f"드랍 확률: {self.drop_rate*100:.1f}%, 일일 한도: {self.max_daily_amount} USDT")
-        logging.info(f"모드: {'시뮬레이션' if self.simulation_mode else '실제 전송'}")
+        logging.info("USDC 드랍 봇 시작")
+        logging.info(f"드랍 확률: {self.drop_rate*100:.1f}%, 일일 한도: {self.max_daily_amount} USDC")
         
         try:
             self.bot.infinity_polling(timeout=10, long_polling_timeout=5)
         except Exception as e:
             logging.error(f"봇 실행 오류: {e}")
         finally:
-            logging.info("USDT 드랍 봇 종료")
+            logging.info("USDC 드랍 봇 종료")
 
 def main():
     """메인 함수"""
     try:
-        bot = USDTDropBot()
+        bot = USDCDropBot()
         bot.run()
     except Exception as e:
         logging.error(f"메인 함수 오류: {e}")
