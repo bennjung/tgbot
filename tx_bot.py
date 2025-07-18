@@ -162,20 +162,24 @@ class TransactionManager:
             logging.error(f"USDC 잔고 조회 실패: {e}")
             return 0.0
     
-    def send_usdc(self, to_address: str, amount: float) -> Optional[str]:
-        """USDC 전송"""
+    def send_usdc(self, to_address: str, amount: float, retry_count: int = 0) -> Optional[str]:  # [modify]
+        """USDC 전송 (underpriced 오류 처리 포함)"""  # [modify]
         try:
             to_checksum = Web3.to_checksum_address(to_address)
             amount_wei = int(amount * (10 ** 6))  # USDC 6자리 소수점
             
-            # 트랜잭션 구성
+            # [modify] 가스 가격 동적 조정 (재시도시 증가)
+            base_gas_price = 0.1  # [modify] 기본 0.1 gwei
+            gas_price = base_gas_price + (retry_count * 0.05)  # [modify] 재시도마다 0.05 gwei 증가
+            
+            # [modify] 트랜잭션 구성 (underpriced 오류 방지 최적화)
             transaction = self.usdc_contract.functions.transfer(
                 to_checksum, amount_wei
             ).build_transaction({
                 'from': self.account.address,
-                'gas': 100000,
-                'gasPrice': self.w3.to_wei('20', 'gwei'),
-                'nonce': self.w3.eth.get_transaction_count(self.account.address),
+                'gas': 45000,  # [modify] 실제 사용량 40,235 + 12% 안전마진
+                'gasPrice': self.w3.to_wei(str(gas_price), 'gwei'),  # [modify] 동적 가스 가격
+                'nonce': self.w3.eth.get_transaction_count(self.account.address, 'pending'),  # [modify] pending nonce 사용
             })
             
             # 트랜잭션 서명
@@ -184,11 +188,20 @@ class TransactionManager:
             # 트랜잭션 전송
             tx_hash = self.w3.eth.send_raw_transaction(signed_txn.rawTransaction)
             
-            logging.info(f"USDC 전송 완료: {amount} USDC를 {to_address}로 (해시: {tx_hash.hex()})")
+            logging.info(f"USDC 전송 완료: {amount} USDC를 {to_address}로 (가스: {gas_price} gwei, 해시: {tx_hash.hex()})")  # [modify]
             return tx_hash.hex()
             
         except Exception as e:
-            logging.error(f"USDC 전송 실패: {e}")
+            error_msg = str(e)  # [modify]
+            
+            # [modify] underpriced 오류 처리 분기점
+            if "underpriced" in error_msg.lower() and retry_count < 3:  # [modify]
+                logging.warning(f"Underpriced 오류 감지, 재시도 {retry_count + 1}/3 (가스 가격 증가)")  # [modify]
+                import time  # [modify]
+                time.sleep(2)  # [modify] 2초 대기 후 재시도
+                return self.send_usdc(to_address, amount, retry_count + 1)  # [modify]
+            
+            logging.error(f"USDC 전송 실패 (재시도 {retry_count}회): {e}")  # [modify]
             return None
 
 class USDCDropBot:
@@ -224,6 +237,10 @@ class USDCDropBot:
         
         # 일일 전송량 추적
         self.daily_sent = {}
+        
+        # [modify] 전송 쿨타임 관리 (새로 추가)
+        self.last_transaction_time = {}  # [modify] 사용자별 마지막 전송 시간
+        self.cooldown_seconds = float(os.getenv('COOLDOWN_SECONDS', '30'))  # [modify] 기본 30초 쿨타임
         
         # 핸들러 설정
         self.setup_handlers()
@@ -301,6 +318,7 @@ class USDCDropBot:
 💰 하루 최대: {self.max_daily_amount} USDC
 📈 오늘 전송: {today_sent:.2f} USDC
 👥 등록 지갑: {len(self.wallet_manager.get_all_wallets())}개
+⏰ 전송 쿨타임: {self.cooldown_seconds}초  # [modify] 쿨타임 정보 추가
 
 🌐 체인: Base Network
             """
@@ -345,6 +363,15 @@ class USDCDropBot:
         if not wallet_address:
             return  # 지갑 미등록시 드랍 없음
         
+        # [modify] 쿨타임 체크 (새로 추가)
+        now = datetime.now()  # [modify]
+        last_tx_time = self.last_transaction_time.get(user_id)  # [modify]
+        if last_tx_time:  # [modify]
+            time_diff = (now - last_tx_time).total_seconds()  # [modify]
+            if time_diff < self.cooldown_seconds:  # [modify]
+                logging.info(f"쿨타임: {user_name} ({user_id}) - {self.cooldown_seconds - time_diff:.1f}초 남음")  # [modify]
+                return  # [modify] 쿨타임 중
+        
         # 일일 한도 확인
         today = datetime.now().date().isoformat()
         today_sent = self.daily_sent.get(today, 0)
@@ -375,6 +402,9 @@ class USDCDropBot:
             # 일일 전송량 업데이트
             self.daily_sent[today] = today_sent + drop_amount
             
+            # [modify] 쿨타임 업데이트 (새로 추가)
+            self.last_transaction_time[user_id] = now  # [modify]
+            
             # 드랍 알림
             drop_text = f"""
 💸 USDC 드랍! 🎉
@@ -383,10 +413,11 @@ class USDCDropBot:
 💰 {drop_amount} USDC
 💳 {wallet_address[:10]}...{wallet_address[-10:]}
 🔗 TX: {tx_hash[:10]}...{tx_hash[-10:]}
-            """
+⏰ 다음 가능: {self.cooldown_seconds}초 후
+            """  # [modify] 쿨타임 정보 추가
             
             self.bot.reply_to(message, drop_text)
-            logging.info(f"드랍 성공: {user_name} ({user_id}) -> {drop_amount} USDC")
+            logging.info(f"드랍 성공: {user_name} ({user_id}) -> {drop_amount} USDC (쿨타임 {self.cooldown_seconds}초 시작)")  # [modify]
     
     def run(self):
         """봇 실행"""
