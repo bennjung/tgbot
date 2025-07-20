@@ -172,15 +172,17 @@ class TransactionManager:
             base_gas_price = 0.1  # [modify] 기본 0.1 gwei
             gas_price = base_gas_price + (retry_count * 0.05)  # [modify] 재시도마다 0.05 gwei 증가
             
-            # [modify] 트랜잭션 구성 (underpriced 오류 방지 최적화)
-            transaction = self.usdc_contract.functions.transfer(
-                to_checksum, amount_wei
-            ).build_transaction({
+            # [modify] 트랜잭션 구성 (자동 가스 추정으로 변경)
+            tx_params = {
                 'from': self.account.address,
-                'gas': 45000,  # [modify] 실제 사용량 40,235 + 12% 안전마진
                 'gasPrice': self.w3.to_wei(str(gas_price), 'gwei'),  # [modify] 동적 가스 가격
                 'nonce': self.w3.eth.get_transaction_count(self.account.address, 'pending'),  # [modify] pending nonce 사용
-            })
+            }
+            
+            # [modify] 'gas' 항목 제거 - 라이브러리가 자동으로 최적 가스 한도 추정
+            transaction = self.usdc_contract.functions.transfer(
+                to_checksum, amount_wei
+            ).build_transaction(tx_params)
             
             # 트랜잭션 서명
             signed_txn = self.w3.eth.account.sign_transaction(transaction, self.private_key)
