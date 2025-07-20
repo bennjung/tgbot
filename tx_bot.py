@@ -162,48 +162,95 @@ class TransactionManager:
             logging.error(f"USDC 잔고 조회 실패: {e}")
             return 0.0
     
-    def send_usdc(self, to_address: str, amount: float, retry_count: int = 0) -> Optional[str]:  # [modify]
-        """USDC 전송 (underpriced 오류 처리 포함)"""  # [modify]
+    def get_optimal_gas_estimate(self, to_address: str, amount: float) -> dict:
+        """실제 전송 전 동적 가스 추정"""
         try:
             to_checksum = Web3.to_checksum_address(to_address)
             amount_wei = int(amount * (10 ** 6))  # USDC 6자리 소수점
             
-            # [modify] 가스 가격 동적 조정 (재시도시 증가)
-            base_gas_price = 0.1  # [modify] 기본 0.1 gwei
-            gas_price = base_gas_price + (retry_count * 0.05)  # [modify] 재시도마다 0.05 gwei 증가
+            # 현재 네트워크 상황으로 가스 추정
+            estimated_gas = self.usdc_contract.functions.transfer(
+                to_checksum, amount_wei
+            ).estimate_gas({
+                'from': self.account.address
+            })
             
-            # [modify] 트랜잭션 구성 (자동 가스 추정으로 변경)
-            tx_params = {
-                'from': self.account.address,
-                'gasPrice': self.w3.to_wei(str(gas_price), 'gwei'),  # [modify] 동적 가스 가격
-                'nonce': self.w3.eth.get_transaction_count(self.account.address, 'pending'),  # [modify] pending nonce 사용
+            # Base 공식 문서 기준: ERC-20 전송은 ~65,000 gas
+            base_recommended = 65000
+            
+            # 추정값과 권장값 중 높은 값에 안전 마진 추가
+            optimal_gas = max(estimated_gas, base_recommended)
+            safe_gas = int(optimal_gas * 1.2)  # 20% 안전 마진
+            
+            # 최대 한도 설정 (과도한 가스 방지)
+            max_gas = 100000
+            final_gas = min(safe_gas, max_gas)
+            
+            logging.info(f"가스 추정 결과: 추정={estimated_gas:,}, 권장={base_recommended:,}, 최종={final_gas:,}")
+            
+            return {
+                'estimated': estimated_gas,
+                'recommended': base_recommended,
+                'final': final_gas,
+                'margin': f"{((final_gas - estimated_gas) / estimated_gas * 100):.1f}%"
             }
             
-            # [modify] 'gas' 항목 제거 - 라이브러리가 자동으로 최적 가스 한도 추정
+        except Exception as e:
+            logging.warning(f"동적 가스 추정 실패, 기본값 사용: {e}")
+            # 추정 실패시 Base 권장값 + 마진
+            return {
+                'estimated': 0,
+                'recommended': 65000,
+                'final': 78000,  # 65000 * 1.2
+                'margin': '20.0%'
+            }
+
+    def send_usdc(self, to_address: str, amount: float, retry_count: int = 0) -> Optional[str]:
+        """USDC 전송 (동적 가스 추정)"""
+        try:
+            to_checksum = Web3.to_checksum_address(to_address)
+            amount_wei = int(amount * (10 ** 6))  # USDC 6자리 소수점
+            
+            # 1단계: 현재 상황에 최적화된 가스 추정
+            gas_info = self.get_optimal_gas_estimate(to_address, amount)
+            optimal_gas = gas_info['final']
+            
+            # 2단계: 가스 가격 동적 조정 (재시도시 증가)
+            base_gas_price = 0.1
+            gas_price = base_gas_price + (retry_count * 0.05)
+            
+            # 3단계: 트랜잭션 구성 (가스 한도 명시적 설정)
+            transaction_params = {
+                'from': self.account.address,
+                'gasPrice': self.w3.to_wei(str(gas_price), 'gwei'),
+                'gas': optimal_gas,  # 동적으로 계산된 최적 가스
+                'nonce': self.w3.eth.get_transaction_count(self.account.address, 'pending'),
+            }
+
+            # 4단계: 트랜잭션 빌드 및 전송
             transaction = self.usdc_contract.functions.transfer(
                 to_checksum, amount_wei
-            ).build_transaction(tx_params)
+            ).build_transaction(transaction_params)
             
-            # 트랜잭션 서명
+            # 트랜잭션 서명 및 전송
             signed_txn = self.w3.eth.account.sign_transaction(transaction, self.private_key)
-            
-            # 트랜잭션 전송
             tx_hash = self.w3.eth.send_raw_transaction(signed_txn.rawTransaction)
             
-            logging.info(f"USDC 전송 완료: {amount} USDC를 {to_address}로 (가스: {gas_price} gwei, 해시: {tx_hash.hex()})")  # [modify]
+            logging.info(f"USDC 전송 성공: {amount} USDC를 {to_address}로")
+            logging.info(f"가스 정보: {gas_info['margin']} 마진, 한도 {optimal_gas:,}, 해시: {tx_hash.hex()}")
             return tx_hash.hex()
             
         except Exception as e:
-            error_msg = str(e)  # [modify]
+            error_msg = str(e)
             
-            # [modify] underpriced 오류 처리 분기점
-            if "underpriced" in error_msg.lower() and retry_count < 3:  # [modify]
-                logging.warning(f"Underpriced 오류 감지, 재시도 {retry_count + 1}/3 (가스 가격 증가)")  # [modify]
-                import time  # [modify]
-                time.sleep(2)  # [modify] 2초 대기 후 재시도
-                return self.send_usdc(to_address, amount, retry_count + 1)  # [modify]
+            # underpriced 오류 처리
+            if "underpriced" in error_msg.lower() and retry_count < 3:
+                logging.warning(f"Underpriced 오류, 재시도 {retry_count + 1}/3")
+                import time
+                time.sleep(2)
+                return self.send_usdc(to_address, amount, retry_count + 1)
             
-            logging.error(f"USDC 전송 실패 (재시도 {retry_count}회): {e}")  # [modify]
+            logging.error(f"USDC 전송 실패 (재시도 {retry_count}회): {e}")
             return None
 
 class USDCDropBot:
