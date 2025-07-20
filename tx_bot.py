@@ -282,15 +282,7 @@ class USDCDropBot:
             
             # 인라인 처리: 즉시 검증 및 저장
             if self.wallet_manager.set_wallet(user_id, wallet_address):
-                success_text = f"""
-✅ 지갑 주소가 등록되었습니다!
-
-👤 사용자: {user_name}
-💳 주소: {wallet_address}
-🎲 드랍 확률: {self.drop_rate*100:.1f}%
-
-이제 채팅하면 랜덤으로 USDC를 받을 수 있어요! 🎉
-                """
+                success_text = "✅ 등록완료했습니다!"  # [modify] 메시지 간소화
                 self.bot.reply_to(message, success_text)
                 logging.info(f"지갑 등록 성공: {user_name} ({user_id}) -> {wallet_address}")
             else:
@@ -360,6 +352,10 @@ class USDCDropBot:
     
     def process_message_drop(self, message, user_id: str, user_name: str):
         """메시지별 드랍 처리"""
+        # [modify] 메시지 길이 체크 (5글자 이상)
+        if not message.text or len(message.text) < 5:
+            return  # 5글자 미만시 드랍 없음
+        
         # 지갑이 등록되어 있는지 확인
         wallet_address = self.wallet_manager.get_wallet(user_id)
         if not wallet_address:
@@ -415,8 +411,7 @@ class USDCDropBot:
 💰 {drop_amount} USDC
 💳 {wallet_address[:10]}...{wallet_address[-10:]}
 🔗 TX: {tx_hash[:10]}...{tx_hash[-10:]}
-⏰ 다음 가능: {self.cooldown_seconds}초 후
-            """  # [modify] 쿨타임 정보 추가
+            """  # [modify] 쿨타임 정보 제거
             
             self.bot.reply_to(message, drop_text)
             logging.info(f"드랍 성공: {user_name} ({user_id}) -> {drop_amount} USDC (쿨타임 {self.cooldown_seconds}초 시작)")  # [modify]
