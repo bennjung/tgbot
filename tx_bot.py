@@ -353,14 +353,17 @@ class USDCDropBot:
 ✨ 지갑 등록 후 채팅하면 USDC 드랍 기회를 얻을 수 있습니다! (단 최소 5글자 이상)
 🌐 Base Network을 사용합니다."""
     
-    def send_guide_to_user(self, user_id: str, user_name: str = "Unknown"):
-        """특정 사용자에게 안내문 전송"""
+    def send_guide_to_user(self, chat_id: str, user_id: str, user_name: str = "Unknown"):
+        """그룹에서 신규 사용자 멘션으로 안내문 전송"""
         try:
             guide_message = self.get_guide_message()
-            self.bot.send_message(user_id, guide_message)
-            logging.info(f"신규 사용자 안내문 전송: {user_name} ({user_id})")
+            # 사용자 멘션 추가 (마크다운 링크 방식)
+            mention_text = f"[{user_name}](tg://user?id={user_id}) 님 환영합니다! 🎉\n\n{guide_message}"
+            
+            self.bot.send_message(chat_id, mention_text, parse_mode="Markdown")
+            logging.info(f"신규 사용자 그룹 안내문 전송: {user_name} ({user_id})")
         except Exception as e:
-            logging.error(f"안내문 전송 실패: {user_name} ({user_id}) - {e}")
+            logging.error(f"그룹 안내문 전송 실패: {user_name} ({user_id}) - {e}")
     
     def send_periodic_guide(self):
         """정기 안내문 전송 (그룹 채팅)"""
@@ -470,7 +473,8 @@ class USDCDropBot:
                 
                 # 신규 사용자 확인 및 안내문 전송
                 if self.wallet_manager.is_new_user(user_id):
-                    self.send_guide_to_user(user_id, user_name)
+                    chat_id = str(message.chat.id)
+                    self.send_guide_to_user(chat_id, user_id, user_name)
                     logging.info(f"신규 사용자 입장: {user_name} ({user_id})")
                 
                 # 메시지가 명령어인 경우 무시
