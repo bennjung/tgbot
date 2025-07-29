@@ -4,6 +4,8 @@ Base 체인 USDC 드랍 텔레그램 봇
 기능:
 1. 지갑 등록: /set "wallet_address" 인라인 처리
 2. 랜덤 드랍: 채팅시 일정 확률로 USDC 전송
+3. 신규 사용자 안내문 자동 전송
+4. 정기 안내문 (4시간마다)
 """
 
 import os
@@ -17,6 +19,7 @@ import telebot
 from dotenv import load_dotenv
 from web3 import Web3
 from eth_account import Account
+from apscheduler.schedulers.background import BackgroundScheduler
 
 # 환경변수 로드
 load_dotenv()
@@ -34,9 +37,11 @@ logging.basicConfig(
 class WalletManager:
     """지갑 주소 관리 클래스"""
     
-    def __init__(self, wallet_file: str = "wallets.json"):
+    def __init__(self, wallet_file: str = "wallets.json", users_file: str = "users.json"):
         self.wallet_file = wallet_file
+        self.users_file = users_file
         self.wallets = self._load_wallets()
+        self.known_users = self._load_known_users()
     
     """지갑 데이터 로드"""
     def _load_wallets(self) -> Dict[str, str]:
@@ -50,6 +55,18 @@ class WalletManager:
             logging.error(f"지갑 데이터 로드 실패: {e}")
             return {}
     
+    """사용자 목록 로드"""
+    def _load_known_users(self) -> set:
+        try:
+            if os.path.exists(self.users_file):
+                with open(self.users_file, 'r', encoding='utf-8') as f:
+                    user_list = json.load(f)
+                    return set(user_list)
+            return set()
+        except Exception as e:
+            logging.error(f"사용자 데이터 로드 실패: {e}")
+            return set()
+    
     """지갑 데이터 저장"""
     def _save_wallets(self) -> bool:
         
@@ -60,6 +77,24 @@ class WalletManager:
         except Exception as e:
             logging.error(f"지갑 데이터 저장 실패: {e}")
             return False
+    
+    """사용자 목록 저장"""
+    def _save_known_users(self) -> bool:
+        try:
+            with open(self.users_file, 'w', encoding='utf-8') as f:
+                json.dump(list(self.known_users), f, indent=2, ensure_ascii=False)
+            return True
+        except Exception as e:
+            logging.error(f"사용자 데이터 저장 실패: {e}")
+            return False
+    
+    """신규 사용자 확인 및 등록"""
+    def is_new_user(self, user_id: str) -> bool:
+        if user_id not in self.known_users:
+            self.known_users.add(user_id)
+            self._save_known_users()
+            return True
+        return False
     
     """지갑 주소 유효성 검사"""
     def is_valid_address(self, address: str) -> bool:
@@ -180,7 +215,7 @@ class TransactionManager:
             
             # 추정값과 권장값 중 높은 값에 안전 마진 추가
             optimal_gas = max(estimated_gas, base_recommended)
-            safe_gas = int(optimal_gas * 1.2)  # 20% 안전 마진
+            safe_gas = int(optimal_gas * 1.1)  # 10% 안전 마진
             
             # 최대 한도 설정 (과도한 가스 방지)
             max_gas = 100000
@@ -201,8 +236,8 @@ class TransactionManager:
             return {
                 'estimated': 0,
                 'recommended': 65000,
-                'final': 78000,  # 65000 * 1.2
-                'margin': '20.0%'
+                'final': 71500,  # 65000 * 1.1
+                'margin': '10.0%'
             }
 
     def send_usdc(self, to_address: str, amount: float, retry_count: int = 0) -> Optional[str]:
@@ -265,6 +300,7 @@ class USDCDropBot:
         self.drop_rate = float(os.getenv('DROP_RATE', '0.05'))  # 5%
         self.max_daily_amount = float(os.getenv('MAX_DAILY_AMOUNT', '10.0'))  # Alter 10 USDC
         self.admin_user_id = os.getenv('ADMIN_USER_ID')
+        self.group_chat_id = os.getenv('GROUP_CHAT_ID')  # 정기 안내문을 보낼 그룹 채팅 ID
         
         if not self.bot_token:
             raise ValueError("TELEGRAM_BOT_TOKEN이 설정되지 않았습니다.")
@@ -287,13 +323,73 @@ class USDCDropBot:
         # 일일 전송량 추적
         self.daily_sent = {}
         
-        # [modify] 전송 쿨타임 관리 (새로 추가)
-        self.last_transaction_time = {}  # [modify] 사용자별 마지막 전송 시간
-        self.cooldown_seconds = float(os.getenv('COOLDOWN_SECONDS', '30'))  # [modify] 기본 30초 쿨타임
+        # 전송 쿨타임 관리
+        self.last_transaction_time = {}
+        self.cooldown_seconds = float(os.getenv('COOLDOWN_SECONDS', '30'))
+        
+        # APScheduler 초기화
+        self.scheduler = BackgroundScheduler()
         
         # 핸들러 설정
         self.setup_handlers()
+        
+        # 정기 안내문 스케줄 설정
+        self.setup_periodic_guide()
     
+    def get_guide_message(self) -> str:
+        """안내문 메시지 반환"""
+        return f"""🎯 곰빵봇 사용 안내
+
+🤖 곰빵봇은 채팅 시 랜덤으로 USDC를 드랍해주는 Base 체인 기반 텔레그램 봇입니다!
+
+
+📝 지갑 등록 방법:
+아래 명령어를 입력해서 지갑을 등록해주세요
+
+> /set 지갑주소
+
+예시: /set 0x1234567890abcdef1234567890abcdef12345678
+
+✨ 지갑 등록 후 채팅하면 USDC 드랍 기회를 얻을 수 있습니다! (단 최소 5글자 이상)
+🌐 Base Network을 사용합니다."""
+    
+    def send_guide_to_user(self, user_id: str, user_name: str = "Unknown"):
+        """특정 사용자에게 안내문 전송"""
+        try:
+            guide_message = self.get_guide_message()
+            self.bot.send_message(user_id, guide_message)
+            logging.info(f"신규 사용자 안내문 전송: {user_name} ({user_id})")
+        except Exception as e:
+            logging.error(f"안내문 전송 실패: {user_name} ({user_id}) - {e}")
+    
+    def send_periodic_guide(self):
+        """정기 안내문 전송 (그룹 채팅)"""
+        if not self.group_chat_id:
+            logging.warning("GROUP_CHAT_ID가 설정되지 않아 정기 안내문을 보낼 수 없습니다.")
+            return
+        
+        try:
+            guide_message = self.get_guide_message()
+            self.bot.send_message(self.group_chat_id, guide_message)
+            logging.info(f"정기 안내문 전송 완료: {self.group_chat_id}")
+        except Exception as e:
+            logging.error(f"정기 안내문 전송 실패: {e}")
+    
+    def setup_periodic_guide(self):
+        """정기 안내문 스케줄 설정 (4시간마다)"""
+        try:
+            self.scheduler.add_job(
+                func=self.send_periodic_guide,
+                trigger="interval",
+                hours=4,
+                id="periodic_guide",
+                name="정기 안내문 전송",
+                replace_existing=True
+            )
+            logging.info("정기 안내문 스케줄 설정 완료 (4시간마다)")
+        except Exception as e:
+            logging.error(f"정기 안내문 스케줄 설정 실패: {e}")
+
     def setup_handlers(self):
         """메시지 핸들러 설정"""
         
@@ -367,10 +463,15 @@ class USDCDropBot:
         
         @self.bot.message_handler(func=lambda message: True)
         def handle_all_messages(message):
-            """모든 메시지 처리 - 랜덤 드랍 트리거"""
+            """모든 메시지 처리 - 신규 사용자 안내 및 랜덤 드랍 트리거"""
             if message.from_user:
                 user_id = str(message.from_user.id)
                 user_name = message.from_user.first_name or message.from_user.username or "Unknown"
+                
+                # 신규 사용자 확인 및 안내문 전송
+                if self.wallet_manager.is_new_user(user_id):
+                    self.send_guide_to_user(user_id, user_name)
+                    logging.info(f"신규 사용자 입장: {user_name} ({user_id})")
                 
                 # 메시지가 명령어인 경우 무시
                 if message.text and message.text.startswith('/'):
@@ -469,10 +570,22 @@ class USDCDropBot:
         logging.info(f"드랍 확률: {self.drop_rate*100:.1f}%, 일일 한도: {self.max_daily_amount} USDC")
         
         try:
+            # 스케줄러 시작
+            self.scheduler.start()
+            logging.info("APScheduler 시작 완료")
+            
+            # 봇 시작
             self.bot.infinity_polling(timeout=10, long_polling_timeout=5)
         except Exception as e:
             logging.error(f"봇 실행 오류: {e}")
         finally:
+            # 스케줄러 종료
+            try:
+                self.scheduler.shutdown()
+                logging.info("APScheduler 종료 완료")
+            except Exception as e:
+                logging.error(f"APScheduler 종료 오류: {e}")
+            
             logging.info("USDC 드랍 봇 종료")
 
 def main():
