@@ -443,22 +443,41 @@ class USDCDropBot:
         
         @self.bot.message_handler(commands=['info'])
         def handle_info(message):
-            """봇 정보 및 설정"""
-            today = datetime.now().date().isoformat()
-            today_sent = self.daily_sent.get(today, 0)
-            
-            info_text = f"""
-📊 봇 설정 정보:
+            """관리자에게 채팅 ID 정보 전송"""
+            # 관리자에게 현재 채팅 ID 정보 전송
+            if self.admin_user_id:
+                try:
+                    current_chat_id = message.chat.id
+                    chat_type = "개인 채팅" if current_chat_id > 0 else "그룹 채팅"
+                    chat_title = getattr(message.chat, 'title', '제목 없음')
+                    today = datetime.now().date().isoformat()
+                    today_sent = self.daily_sent.get(today, 0)
+                    
+                    admin_message = f"""
+🔧 관리자 정보
 
+📍 현재 채팅 정보:
+🆔 채팅 ID: {current_chat_id}
+📋 채팅 유형: {chat_type}
+📝 채팅 제목: {chat_title}
+
+📊 봇 설정 정보:
 🎲 드랍 확률: {self.drop_rate*100:.1f}%
 💰 하루 최대: {self.max_daily_amount} USDC
 📈 오늘 전송: {today_sent:.2f} USDC
 👥 등록 지갑: {len(self.wallet_manager.get_all_wallets())}개
-⏰ 전송 쿨타임: {self.cooldown_seconds}초  # [modify] 쿨타임 정보 추가
+⏰ 전송 쿨타임: {self.cooldown_seconds}초
 
-🌐 체인: Base Network
-            """
-            self.bot.reply_to(message, info_text)
+💡 .env 파일에 추가할 내용:
+GROUP_CHAT_ID={current_chat_id}
+                    """
+                    
+                    self.bot.send_message(self.admin_user_id, admin_message)
+                    logging.info(f"관리자에게 채팅 ID 정보 전송: {current_chat_id}")
+                except Exception as e:
+                    logging.error(f"관리자에게 채팅 ID 전송 실패: {e}")
+            else:
+                logging.warning("ADMIN_USER_ID가 설정되지 않아 채팅 ID를 전송할 수 없습니다.")
         
         @self.bot.message_handler(content_types=['new_chat_members'])
         def handle_new_members(message):
