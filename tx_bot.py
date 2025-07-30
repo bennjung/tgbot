@@ -374,6 +374,55 @@ class USDCDropBot:
         except Exception as e:
             logging.error(f"정기 안내문 전송 실패: {e}")
     
+    def handle_coffee_jackpot(self, message, user_id: str, user_name: str):
+        """커피 잭팟 당첨 처리"""
+        try:
+            # 먼저 🎰 이모지 전송 (드라마틱 효과)
+            self.bot.reply_to(message, "🎰")
+            
+            # 잠깐 대기 (서스펜스 효과)
+            import time
+            time.sleep(1.5)
+            
+            # 그룹에 당첨 메시지 전송
+            jackpot_text = f"""
+☕🎉 커피 잭팟 당첨! 🎉☕
+
+축하합니다! {user_name}님이 커피 잭팟에 당첨되었습니다!
+
+관리자 확인후 전송 될 예정입니다!
+            """
+            
+            self.bot.reply_to(message, jackpot_text)
+            logging.info(f"커피 잭팟 당첨: {user_name} ({user_id})")
+            
+            # 관리자에게 당첨자 정보 전송
+            if self.admin_user_id:
+                try:
+                    chat_id = message.chat.id
+                    chat_title = getattr(message.chat, 'title', '제목 없음')
+                    current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    
+                    admin_notification = f"""
+☕🎰 커피 잭팟 당첨 알림!
+
+🎊 당첨자 정보:
+👤 이름: {user_name}
+🆔 사용자 ID: {user_id}
+📍 채팅: {chat_title} ({chat_id})
+⏰ 당첨 시간: {current_time}
+
+🍀 당첨 확률: 0.1% (매우 희귀!)
+                    """
+                    
+                    self.bot.send_message(self.admin_user_id, admin_notification)
+                    logging.info(f"관리자에게 커피 잭팟 당첨 알림 전송: {user_name}")
+                except Exception as e:
+                    logging.error(f"관리자에게 커피 잭팟 알림 전송 실패: {e}")
+            
+        except Exception as e:
+            logging.error(f"커피 잭팟 처리 실패: {user_name} - {e}")
+    
     def setup_periodic_guide(self):
         """정기 안내문 스케줄 설정 (4시간마다)"""
         try:
@@ -554,6 +603,13 @@ GROUP_CHAT_ID={current_chat_id}
         
         if today_sent >= self.max_daily_amount:
             return  # 일일 한도 초과
+        
+        # 커피 잭팟 체크 (70% 확률 - 테스트용)
+        coffee_jackpot_rate = 0.7  # 70% - 테스트용
+        if random.random() < coffee_jackpot_rate:
+            # 커피 잭팟 당첨!
+            self.handle_coffee_jackpot(message, user_id, user_name)
+            return  # 커피 잭팟 당첨시 USDC 드랍 안함
         
         # 랜덤 드랍 여부 결정
         if not (self.tx_manager and self.tx_manager.should_drop(self.drop_rate)):
