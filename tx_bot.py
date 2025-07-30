@@ -378,7 +378,7 @@ class USDCDropBot:
         """커피 잭팟 당첨 처리"""
         try:
             # 먼저 🎰 이모지 전송 (드라마틱 효과)
-            self.bot.reply_to(message, "🎰")
+            self.bot.reply_to(message, "🎰🎰🎰")
             
             # 잠깐 대기 (서스펜스 효과)
             import time
@@ -604,8 +604,8 @@ GROUP_CHAT_ID={current_chat_id}
         if today_sent >= self.max_daily_amount:
             return  # 일일 한도 초과
         
-        # 커피 잭팟 체크 (70% 확률 - 테스트용)
-        coffee_jackpot_rate = 0.7  # 70% - 테스트용
+        # 커피 잭팟 체크 (0.1% 확률)
+        coffee_jackpot_rate = 0.001  # 0.1%
         if random.random() < coffee_jackpot_rate:
             # 커피 잭팟 당첨!
             self.handle_coffee_jackpot(message, user_id, user_name)
