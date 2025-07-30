@@ -559,8 +559,8 @@ GROUP_CHAT_ID={current_chat_id}
         if not (self.tx_manager and self.tx_manager.should_drop(self.drop_rate)):
             return  # 드랍 안함
         
-        # 드랍 금액 (0.005 ~ 0.01 USDC)
-        drop_amount = round(random.uniform(0.005, 0.01), 3)
+        # 드랍 금액 (0.005 ~ 0.1 USDC)
+        drop_amount = round(random.uniform(0.005, 0.1), 3)
         
         # 일일 한도 체크
         if today_sent + drop_amount > self.max_daily_amount:
