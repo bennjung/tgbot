@@ -412,7 +412,7 @@ class USDCDropBot:
 📍 채팅: {chat_title} ({chat_id})
 ⏰ 당첨 시간: {current_time}
 
-🍀 당첨 확률: 0.1% (매우 희귀!)
+🍀 당첨 확률: 0.01% (극도로 희귀!)
                     """
                     
                     self.bot.send_message(self.admin_user_id, admin_notification)
@@ -604,8 +604,8 @@ GROUP_CHAT_ID={current_chat_id}
         if today_sent >= self.max_daily_amount:
             return  # 일일 한도 초과
         
-        # 커피 잭팟 체크 (0.1% 확률)
-        coffee_jackpot_rate = 0.001  # 0.1%
+        # 커피 잭팟 체크 (0.01% 확률)
+        coffee_jackpot_rate = 0.0001  # 0.01%
         if random.random() < coffee_jackpot_rate:
             # 커피 잭팟 당첨!
             self.handle_coffee_jackpot(message, user_id, user_name)
