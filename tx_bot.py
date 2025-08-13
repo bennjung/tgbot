@@ -604,8 +604,8 @@ GROUP_CHAT_ID={current_chat_id}
         if today_sent >= self.max_daily_amount:
             return  # 일일 한도 초과
         
-        # 커피 잭팟 체크 (0.005% 확률)
-        coffee_jackpot_rate = 0.00005  # 0.005%
+        # 커피 잭팟 체크 (0.0001% 확률)
+        coffee_jackpot_rate = 0.000001  # 0.0001%
         if random.random() < coffee_jackpot_rate:
             # 커피 잭팟 당첨!
             self.handle_coffee_jackpot(message, user_id, user_name)
