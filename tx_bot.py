@@ -292,6 +292,9 @@ class USDCDropBot:
     """USDC 드랍 텔레그램 봇"""
     
     def __init__(self):
+        # 봇 시작 시간 기록 (과거 메시지 필터링용)
+        self.bot_start_time = datetime.now()
+        
         # 환경변수 로드
         self.bot_token = os.getenv('TELEGRAM_BOT_TOKEN')
         self.base_rpc = os.getenv('RPC_URL', 'https://base-mainnet.public.blastapi.io')
@@ -335,6 +338,24 @@ class USDCDropBot:
         
         # 정기 안내문 스케줄 설정
         self.setup_periodic_guide()
+        
+        # 봇 시작시 과거 메시지 스킵
+        self.skip_old_updates()
+    
+    def skip_old_updates(self):
+        """봇 시작시 과거 업데이트 모두 스킵"""
+        try:
+            # 현재까지의 모든 업데이트를 가져와서 마지막 update_id를 구함
+            updates = self.bot.get_updates(timeout=1)
+            if updates:
+                last_update_id = updates[-1].update_id
+                # 마지막 업데이트 이후부터 처리하도록 설정
+                self.bot.get_updates(offset=last_update_id + 1, timeout=1)
+                logging.info(f"과거 업데이트 {len(updates)}개 스킵 완료 (마지막 update_id: {last_update_id})")
+            else:
+                logging.info("스킵할 과거 업데이트 없음")
+        except Exception as e:
+            logging.warning(f"과거 업데이트 스킵 실패 (계속 진행): {e}")
     
     def get_guide_message(self) -> str:
         """안내문 메시지 반환"""
@@ -579,6 +600,12 @@ GROUP_CHAT_ID={current_chat_id}
     
     def process_message_drop(self, message, user_id: str, user_name: str):
         """메시지별 드랍 처리"""
+        # 과거 메시지 필터링 (봇 시작 이전 메시지 무시)
+        message_time = datetime.fromtimestamp(message.date)
+        if message_time < self.bot_start_time:
+            logging.info(f"과거 메시지 무시: {user_name} - {message_time} < {self.bot_start_time}")
+            return
+        
         # [modify] 메시지 길이 체크 (5글자 이상)
         if not message.text or len(message.text) < 5:
             return  # 5글자 미만시 드랍 없음
@@ -615,8 +642,8 @@ GROUP_CHAT_ID={current_chat_id}
         if not (self.tx_manager and self.tx_manager.should_drop(self.drop_rate)):
             return  # 드랍 안함
         
-        # 드랍 금액 (0.005 ~ 0.1 USDC)
-        drop_amount = round(random.uniform(0.005, 0.1), 3)
+        # 드랍 금액 (0.005 ~ 0.05 USDC)
+        drop_amount = round(random.uniform(0.005, 0.05), 3)
         
         # 일일 한도 체크
         if today_sent + drop_amount > self.max_daily_amount:
