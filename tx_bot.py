@@ -498,6 +498,12 @@ class USDCDropBot:
         @self.bot.message_handler(commands=['set'])
         def handle_set_wallet(message):
             """지갑 주소 설정 (인라인 처리)"""
+            # 드랍 차단 대화방에서는 /set 명령어도 무시
+            chat_id = message.chat.id
+            if self.is_drop_blocked_chat(chat_id):
+                logging.info(f"차단된 대화방에서 /set 명령어 무시: chat {chat_id}")
+                return
+            
             user_id = str(message.from_user.id)
             user_name = message.from_user.first_name or message.from_user.username or "Unknown"
             
@@ -519,6 +525,12 @@ class USDCDropBot:
         @self.bot.message_handler(commands=['wallet'])
         def handle_wallet_info(message):
             """내 지갑 정보 조회"""
+            # 드랍 차단 대화방에서는 /wallet 명령어도 무시
+            chat_id = message.chat.id
+            if self.is_drop_blocked_chat(chat_id):
+                logging.info(f"차단된 대화방에서 /wallet 명령어 무시: chat {chat_id}")
+                return
+            
             user_id = str(message.from_user.id)
             wallet = self.wallet_manager.get_wallet(user_id)
             
