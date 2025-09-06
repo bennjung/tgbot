@@ -305,6 +305,18 @@ class USDCDropBot:
         self.admin_user_id = os.getenv('ADMIN_USER_ID')
         self.group_chat_id = os.getenv('GROUP_CHAT_ID')  # 정기 안내문을 보낼 그룹 채팅 ID
         
+        # 드랍 차단 대화방 목록 (환경변수에서 쉼표로 구분된 채팅 ID들)
+        blocked_chats_env = os.getenv('BLOCKED_CHAT_IDS', '')
+        self.blocked_chat_ids = set()
+        if blocked_chats_env:
+            try:
+                # 쉼표로 구분된 채팅 ID들을 파싱하여 정수로 변환
+                self.blocked_chat_ids = {int(chat_id.strip()) for chat_id in blocked_chats_env.split(',') if chat_id.strip()}
+                logging.info(f"드랍 차단 대화방 {len(self.blocked_chat_ids)}개 설정: {self.blocked_chat_ids}")
+            except ValueError as e:
+                logging.error(f"BLOCKED_CHAT_IDS 파싱 실패: {e}")
+                self.blocked_chat_ids = set()
+        
         if not self.bot_token:
             raise ValueError("TELEGRAM_BOT_TOKEN이 설정되지 않았습니다.")
         
@@ -381,6 +393,10 @@ class USDCDropBot:
             logging.info(f"그룹 입장 안내문 전송: {user_name}")
         except Exception as e:
             logging.error(f"그룹 안내문 전송 실패: {user_name} - {e}")
+    
+    def is_drop_blocked_chat(self, chat_id: int) -> bool:
+        """특정 대화방에서 드랍이 차단되어 있는지 확인"""
+        return chat_id in self.blocked_chat_ids
     
     def send_periodic_guide(self):
         """정기 안내문 전송 (그룹 채팅)"""
@@ -470,7 +486,7 @@ class USDCDropBot:
 
 💰 기능:
 - 지갑 등록: /set wallet_address
-- 현재 설정: /info
+- 관리자 정보: /adinfo
 - 내 지갑: /wallet
 
 🎲 랜덤 드랍:
@@ -511,8 +527,8 @@ class USDCDropBot:
             else:
                 self.bot.reply_to(message, "❌ 등록된 지갑이 없습니다. /set 명령어로 지갑을 등록해주세요.")
         
-        @self.bot.message_handler(commands=['info'])
-        def handle_info(message):
+        @self.bot.message_handler(commands=['adinfo'])
+        def handle_adinfo(message):
             """관리자에게 채팅 ID 정보 전송"""
             # 관리자에게 현재 채팅 ID 정보 전송
             if self.admin_user_id:
@@ -523,6 +539,10 @@ class USDCDropBot:
                     today = datetime.now().date().isoformat()
                     today_sent = self.daily_sent.get(today, 0)
                     
+                    # 현재 채팅이 차단되어 있는지 확인
+                    is_current_blocked = self.is_drop_blocked_chat(current_chat_id)
+                    block_status = "🚫 차단됨" if is_current_blocked else "✅ 활성"
+                    
                     admin_message = f"""
 🔧 관리자 정보
 
@@ -530,6 +550,7 @@ class USDCDropBot:
 🆔 채팅 ID: {current_chat_id}
 📋 채팅 유형: {chat_type}
 📝 채팅 제목: {chat_title}
+🎯 드랍 상태: {block_status}
 
 📊 봇 설정 정보:
 🎲 드랍 확률: {self.drop_rate*100:.1f}%
@@ -537,9 +558,11 @@ class USDCDropBot:
 📈 오늘 전송: {today_sent:.2f} USDC
 👥 등록 지갑: {len(self.wallet_manager.get_all_wallets())}개
 ⏰ 전송 쿨타임: {self.cooldown_seconds}초
+🚫 차단 대화방: {len(self.blocked_chat_ids)}개
 
 💡 .env 파일에 추가할 내용:
 GROUP_CHAT_ID={current_chat_id}
+BLOCKED_CHAT_IDS=채팅ID1,채팅ID2,채팅ID3
                     """
                     
                     self.bot.send_message(self.admin_user_id, admin_message)
@@ -604,6 +627,12 @@ GROUP_CHAT_ID={current_chat_id}
         message_time = datetime.fromtimestamp(message.date)
         if message_time < self.bot_start_time:
             logging.info(f"과거 메시지 무시: {user_name} - {message_time} < {self.bot_start_time}")
+            return
+        
+        # 드랍 차단 대화방 체크
+        chat_id = message.chat.id
+        if self.is_drop_blocked_chat(chat_id):
+            logging.info(f"드랍 차단 대화방: {user_name} ({user_id}) in chat {chat_id}")
             return
         
         # [modify] 메시지 길이 체크 (5글자 이상)
