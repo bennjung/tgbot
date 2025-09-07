@@ -305,6 +305,9 @@ class USDCDropBot:
         self.admin_user_id = os.getenv('ADMIN_USER_ID')
         self.group_chat_id = os.getenv('GROUP_CHAT_ID')  # 정기 안내문을 보낼 그룹 채팅 ID
         
+        # 환영 메시지 활성화 옵션 (기본값: True)
+        self.welcome_message_enabled = os.getenv('WELCOME_MESSAGE_ENABLED', 'true').lower() in ('true', '1', 'yes', 'on')
+        
         # 드랍 차단 대화방 목록 (환경변수에서 쉼표로 구분된 채팅 ID들)
         blocked_chats_env = os.getenv('BLOCKED_CHAT_IDS', '')
         self.blocked_chat_ids = set()
@@ -571,6 +574,7 @@ class USDCDropBot:
 👥 등록 지갑: {len(self.wallet_manager.get_all_wallets())}개
 ⏰ 전송 쿨타임: {self.cooldown_seconds}초
 🚫 차단 대화방: {len(self.blocked_chat_ids)}개
+👋 환영 메시지: {'활성화' if self.welcome_message_enabled else '비활성화'}
 
 💡 .env 파일에 추가할 내용:
 GROUP_CHAT_ID={current_chat_id}
@@ -587,6 +591,11 @@ BLOCKED_CHAT_IDS=채팅ID1,채팅ID2,채팅ID3
         @self.bot.message_handler(content_types=['new_chat_members'])
         def handle_new_members(message):
             """새로운 멤버 입장시 안내문 전송"""
+            # 환영 메시지가 비활성화된 경우 무시
+            if not self.welcome_message_enabled:
+                logging.info("환영 메시지 비활성화됨 - 새 멤버 안내문 전송 생략")
+                return
+            
             chat_id = str(message.chat.id)
             
             for new_member in message.new_chat_members:
@@ -722,6 +731,7 @@ BLOCKED_CHAT_IDS=채팅ID1,채팅ID2,채팅ID3
         """봇 실행"""
         logging.info("USDC 드랍 봇 시작")
         logging.info(f"드랍 확률: {self.drop_rate*100:.1f}%, 일일 한도: {self.max_daily_amount} USDC")
+        logging.info(f"환영 메시지: {'활성화' if self.welcome_message_enabled else '비활성화'}")
         
         try:
             # 스케줄러 시작
